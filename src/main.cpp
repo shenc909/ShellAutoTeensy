@@ -14,11 +14,6 @@
  * throttleOut ranges from 0 to 100, while the rest range from -100 to 100.
  * NOTE: THIS CODE HAS YAW RANGE changed from 0 to 70 as per SmoothSteering Code.
  * 
- * Channels to Arduino Pin Table
- * 1 - 2
- * 2 - 3
- * 3 - 21
- * 4 - 20
  */
 
 #include <Filters.h>
