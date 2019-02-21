@@ -36,10 +36,10 @@
 #define JITTERZONE 3
 
 // Software limited steps for the steppers
-#define MINSTEER -1400
-#define MAXSTEER 1400
+#define MINSTEER -3000
+#define MAXSTEER 3000
 #define MINACCEL 0
-#define MAXACCEL 800
+#define MAXACCEL 700
 #define MINBRAKE -1500
 #define MAXBRAKE 0
 
@@ -50,14 +50,14 @@
 // setting up steppers, accel and brakes requires additional timing delay,
 // hence the arbitary pin 11, 12 as dir pin
 AccelStepper steering(1, STEERPPIN, STEERDPIN);
-AccelStepper accelerator(1, ACCELPPIN, 11);
-AccelStepper brakes(1, BRAKEPPIN, 12);
+AccelStepper accelerator(1, ACCELPPIN, ACCELDPIN);
+AccelStepper brakes(1, BRAKEPPIN, BRAKEDPIN);
 
 // Filters out changes faster that 0.5 Hz.
 float filterFrequency = 0.5;
 
 // Create a one pole (RC) lowpass filter
-FilterOnePole steerFilter(LOWPASS, filterFrequency);
+FilterOnePole steerFilter(LOWPASS, filterFrequency, 0.0);
 FilterOnePole accelFilter(LOWPASS, filterFrequency);
 FilterOnePole brakeFilter(LOWPASS, filterFrequency);
 
@@ -121,7 +121,7 @@ void encoderRising();
 
 void setup(){
     Serial.begin(115200);
-    delay(5);
+    delay(3000);
     motorInit();
     Serial.println("Start");
     remoteInit();
@@ -132,42 +132,52 @@ void setup(){
     pinMode(BRAKEPPIN, OUTPUT);
     pinMode(ACCELDPIN, OUTPUT);
     pinMode(ACCELPPIN, OUTPUT);
+    yawOut = 0;
+    steering.setCurrentPosition(steering.currentPosition());
 }
 
 void loop(){
     remoteCalc();
     // remoteDebug();
     // sensorValueS = map(analogRead(potPinS), 0, 1023, 0, 70);
-    encoderCalc();
+    // encoderCalc();
     sensorValueS = steerFilter.input(yawOut);
     sensorValueA = accelFilter.input(throttleOut);
     sensorValueB = brakeFilter.input(pitchOut);
     
     if(sensorValueS > sensorValueSLast + JITTERZONE || sensorValueS < sensorValueSLast - JITTERZONE){
+        // if(sensorValueS > steering.currentPosition() && digitalRead(STEERDPIN) == HIGH){
+        //     digitalWrite(STEERDPIN, LOW);
+        //     delayMicroseconds(10);
+        // }
+        // else if(sensorValueS < steering.currentPosition() && digitalRead(STEERDPIN) == LOW){
+        //     digitalWrite(STEERDPIN, HIGH);
+        //     delayMicroseconds(10);
+        // }
         steering.moveTo(sensorValueS);
         sensorValueSLast = sensorValueS;
     }
     if(sensorValueA > sensorValueALast + JITTERZONE || sensorValueA < sensorValueALast - JITTERZONE){
-        if(sensorValueA > accelerator.currentPosition() && digitalRead(ACCELDPIN) == LOW){
-            digitalWrite(ACCELDPIN, HIGH);
-            delayMicroseconds(10);
-        }
-        else if(sensorValueA < accelerator.currentPosition() && digitalRead(ACCELDPIN) == HIGH){
-            digitalWrite(ACCELDPIN, LOW);
-            delayMicroseconds(10);
-        }
+        // if(sensorValueA > accelerator.currentPosition() && digitalRead(ACCELDPIN) == LOW){
+        //     digitalWrite(ACCELDPIN, HIGH);
+        //     delayMicroseconds(10);
+        // }
+        // else if(sensorValueA < accelerator.currentPosition() && digitalRead(ACCELDPIN) == HIGH){
+        //     digitalWrite(ACCELDPIN, LOW);
+        //     delayMicroseconds(10);
+        // }
         accelerator.moveTo(sensorValueA);
         sensorValueALast = sensorValueA;
     }
     if(sensorValueB > sensorValueBLast + JITTERZONE || sensorValueB < sensorValueBLast - JITTERZONE){
-        if(sensorValueB > brakes.currentPosition() && digitalRead(BRAKEDPIN) == LOW){
-            digitalWrite(BRAKEDPIN, HIGH);
-            delayMicroseconds(10);
-        }
-        else if(sensorValueB < brakes.currentPosition() && digitalRead(BRAKEDPIN) == HIGH){
-            digitalWrite(BRAKEDPIN, LOW);
-            delayMicroseconds(10);
-        }
+        // if(sensorValueB > brakes.currentPosition() && digitalRead(BRAKEDPIN) == LOW){
+        //     digitalWrite(BRAKEDPIN, HIGH);
+        //     delayMicroseconds(10);
+        // }
+        // else if(sensorValueB < brakes.currentPosition() && digitalRead(BRAKEDPIN) == HIGH){
+        //     digitalWrite(BRAKEDPIN, LOW);
+        //     delayMicroseconds(10);
+        // }
         brakes.moveTo(sensorValueB);
         sensorValueBLast = sensorValueB;
     }
@@ -175,25 +185,27 @@ void loop(){
     steering.run();
     accelerator.run();
     brakes.run();
-    Serial.print(sensorValueS);
-    Serial.print("\t");
-    Serial.print(steering.currentPosition());
-    Serial.print("\t");
-    Serial.print(sensorValueA);
-    Serial.print("\t");
-    Serial.println(accelerator.currentPosition());
+    // Serial.print(sensorValueS);
+    // Serial.print("\t");
+    // Serial.print(steering.currentPosition());
+    // Serial.print("\t");
+    // Serial.print(sensorValueA);
+    // Serial.print("\t");
+    // Serial.println(accelerator.currentPosition());
 }
 
 // Initialisation and setup for steppers
 void motorInit(){
-    steering.setMaxSpeed(15000.0);
-    steering.setAcceleration(15000.0);
+    steering.setMaxSpeed(20000.0);
+    steering.setAcceleration(20000.0);
     steering.setPinsInverted(true,false,false);
-    // steering.setMinPulseWidth(5);
+    steering.setMinPulseWidth(20);
     brakes.setMaxSpeed(10000.0);
     brakes.setAcceleration(10000.0);
-    accelerator.setMaxSpeed(10000.0);
-    accelerator.setAcceleration(10000.0);
+    brakes.setMinPulseWidth(20);
+    accelerator.setMaxSpeed(150000.0);
+    accelerator.setAcceleration(150000.0);
+    accelerator.setMinPulseWidth(20);
 }
 
 // Initialisation and setup of remote control
