@@ -1,5 +1,5 @@
 /*
- * allTeensy Code Version 3.0.0
+ * allTeensy Code Version 4.0.0
  * This code is specific to the teensy 3.5
  * 
  */
@@ -18,6 +18,10 @@
 
 #include <Filters.h>
 #include <AccelStepper.h>
+#include <SPI.h>
+#include <AS5048A.h>
+
+#define ROSMODE
 
 // Interrupts configuration
 #define CHANNEL1 36
@@ -39,16 +43,55 @@
 #define MINSTEER -3000
 #define MAXSTEER 3000
 #define MINACCEL 0
-#define MAXACCEL 700
-#define MINBRAKE -1500
+#define MAXACCEL 1200
+#define MINBRAKE -5000
 #define MAXBRAKE 0
 
-// Encoder pin definitions
-#define ENCODER 30
-#define ENCODERD 31
+// Encoder pin definitions for CSn
+#define ENCODER 15
+//#define ANGLE_MODE_1  // Between -180° and 180°
 
-// setting up steppers, accel and brakes requires additional timing delay,
-// hence the arbitary pin 11, 12 as dir pin
+// Final sensor values to be used by the program
+long sensorValueS;
+long sensorValueB;
+long sensorValueA;
+
+long stepS;
+long stepB;
+long stepA;
+
+// Variables for implementing a deadzone to avoid jitter
+long sensorValueALast = 0;
+long sensorValueBLast = 0;
+long sensorValueSLast = 0;
+
+long stepALast = 0;
+long stepBLast = 0;
+long stepSLast = 0;
+
+#ifdef ROSMODE
+  #include <ros.h>
+  #include <std_msgs/Float64.h>
+  ros::NodeHandle nh;
+
+  void messageACb(const std_msgs::Float64& msg){
+    sensorValueA = msg.data;
+  }
+
+  void messageBCb(const std_msgs::Float64& msg){
+    sensorValueB = msg.data;
+  }
+
+  void messageSCb(const std_msgs::Float64& msg){
+    sensorValueS = msg.data;
+  }
+
+  ros::Subscriber<std_msgs::Float64> subA("Accel", &messageACb);
+  ros::Subscriber<std_msgs::Float64> subB("Brake", &messageBCb);
+  ros::Subscriber<std_msgs::Float64> subS("Steering", &messageSCb);
+#endif
+
+// Setting up steppers
 AccelStepper steering(1, STEERPPIN, STEERDPIN);
 AccelStepper accelerator(1, ACCELPPIN, ACCELDPIN);
 AccelStepper brakes(1, BRAKEPPIN, BRAKEDPIN);
@@ -61,70 +104,89 @@ FilterOnePole steerFilter(LOWPASS, filterFrequency, 0.0);
 FilterOnePole accelFilter(LOWPASS, filterFrequency);
 FilterOnePole brakeFilter(LOWPASS, filterFrequency);
 
-// Remote control variable setups
-volatile int throttle = 0;
-volatile int prev_throttle = 0;
-volatile int roll = 0;
-volatile int prev_roll = 0;
-volatile int pitch = 0;
-volatile int prev_pitch = 0;
-volatile int yaw = 0;
-volatile int prev_yaw = 0;
+#ifndef ROSMODE
+  // Remote control variable setups
+  volatile int throttle = 0;
+  volatile int prev_throttle = 0;
+  volatile int roll = 0;
+  volatile int prev_roll = 0;
+  volatile int pitch = 0;
+  volatile int prev_pitch = 0;
+  volatile int yaw = 0;
+  volatile int prev_yaw = 0;
 
-int throttleTop = 0;
-int throttleBtm = 0;
-int rollTop = 0;
-int rollBtm = 0;
-int pitchTop = 0;
-int pitchBtm = 0;
-int yawTop = 0;
-int yawBtm = 0;
+  int throttleTop = 0;
+  int throttleBtm = 0;
+  int rollTop = 0;
+  int rollBtm = 0;
+  int pitchTop = 0;
+  int pitchBtm = 0;
+  int yawTop = 0;
+  int yawBtm = 0;
 
-int throttleOut = 0;
-int rollOut = 0;
-int pitchOut = 0;
-int yawOut = 0;
-
-// Final sensor values to be used by the program
-long sensorValueS;
-long sensorValueB;
-long sensorValueA;
-
-// Variables for implementing a deadzone to avoid jitter
-long sensorValueALast = 0;
-long sensorValueBLast = 0;
-long sensorValueSLast = 0;
+  int throttleOut = 0;
+  int rollOut = 0;
+  int pitchOut = 0;
+  int yawOut = 0;
+#endif
 
 // Encoder code
-const int ticksPerRev = 500;
-volatile long counter = 0;
-float angle = 0;
+AS5048A angleSensor(ENCODER);
+uint16_t zero_position;
+uint16_t zero_position_map;
+float steerAngle = 0;
+
+/**
+ * Basic angle procedure:
+ *
+ * - Obtain register readings (zero position and current position)
+ * - Transform to angles with read2angle() 
+ * - Calculate the difference between them
+ * - normalize() the result
+ *
+ * NOTE:
+ * To see the angles between 0° and 360° comment the following
+ * #define, instead, to see the angles between -180° and 180°,
+ * uncomment it.
+ *
+ */
+
+//#define ANGLE_MODE_1  // Between -180° and 180°
+
 
 // Function forward declaration
 void motorInit();
 void remoteInit();
 void encoderInit();
-void remoteCalc();
-void remoteDebug();
-void encoderCalc();
-void remoteCalibration();
-void remoteVal();
-void rising1();
-void falling1();
-void rising2();
-void falling2();
-void rising3();
-void falling3();
-void rising4();
-void falling4();
-void encoderRising();
+#ifndef ROSMODE
+  void remoteCalc();
+  void remoteDebug();
+  void remoteCalibration();
+  void remoteVal();
+  void rising1();
+  void falling1();
+  void rising2();
+  void falling2();
+  void rising3();
+  void falling3();
+  void rising4();
+  void falling4();
+#endif
+float read2angle(uint16_t);
+float normalise(float);
+
+float encoderCalc();
 
 void setup(){
-    Serial.begin(115200);
+    
     delay(3000);
     motorInit();
     Serial.println("Start");
-    remoteInit();
+    #ifndef ROSMODE
+      Serial.begin(115200);
+      remoteInit();
+      yawOut = 0;
+    #endif
     encoderInit();
     pinMode(STEERDPIN, OUTPUT);
     pinMode(STEERPPIN, OUTPUT);
@@ -132,56 +194,47 @@ void setup(){
     pinMode(BRAKEPPIN, OUTPUT);
     pinMode(ACCELDPIN, OUTPUT);
     pinMode(ACCELPPIN, OUTPUT);
-    yawOut = 0;
     steering.setCurrentPosition(steering.currentPosition());
+    #ifdef ROSMODE
+      nh.initNode();
+      nh.subscribe(subA);
+      nh.subscribe(subB);
+      nh.subscribe(subS);
+    #endif
 }
 
 void loop(){
-    remoteCalc();
-    // remoteDebug();
-    // sensorValueS = map(analogRead(potPinS), 0, 1023, 0, 70);
-    // encoderCalc();
-    sensorValueS = steerFilter.input(yawOut);
-    sensorValueA = accelFilter.input(throttleOut);
-    sensorValueB = brakeFilter.input(pitchOut);
+    #ifndef ROSMODE
+      remoteCalc();
+      // remoteDebug();
+      sensorValueS = steerFilter.input(yawOut);
+      sensorValueA = accelFilter.input(throttleOut);
+      sensorValueB = brakeFilter.input(pitchOut);
+    #endif
+
+    steerAngle = encoderCalc();
+
+    #ifdef ROSMODE
+      nh.spinOnce();
+    #endif
     
-    if(sensorValueS > sensorValueSLast + JITTERZONE || sensorValueS < sensorValueSLast - JITTERZONE){
-        // if(sensorValueS > steering.currentPosition() && digitalRead(STEERDPIN) == HIGH){
-        //     digitalWrite(STEERDPIN, LOW);
-        //     delayMicroseconds(10);
-        // }
-        // else if(sensorValueS < steering.currentPosition() && digitalRead(STEERDPIN) == LOW){
-        //     digitalWrite(STEERDPIN, HIGH);
-        //     delayMicroseconds(10);
-        // }
-        steering.moveTo(sensorValueS);
-        sensorValueSLast = sensorValueS;
-    }
-    if(sensorValueA > sensorValueALast + JITTERZONE || sensorValueA < sensorValueALast - JITTERZONE){
-        // if(sensorValueA > accelerator.currentPosition() && digitalRead(ACCELDPIN) == LOW){
-        //     digitalWrite(ACCELDPIN, HIGH);
-        //     delayMicroseconds(10);
-        // }
-        // else if(sensorValueA < accelerator.currentPosition() && digitalRead(ACCELDPIN) == HIGH){
-        //     digitalWrite(ACCELDPIN, LOW);
-        //     delayMicroseconds(10);
-        // }
-        accelerator.moveTo(sensorValueA);
-        sensorValueALast = sensorValueA;
-    }
-    if(sensorValueB > sensorValueBLast + JITTERZONE || sensorValueB < sensorValueBLast - JITTERZONE){
-        // if(sensorValueB > brakes.currentPosition() && digitalRead(BRAKEDPIN) == LOW){
-        //     digitalWrite(BRAKEDPIN, HIGH);
-        //     delayMicroseconds(10);
-        // }
-        // else if(sensorValueB < brakes.currentPosition() && digitalRead(BRAKEDPIN) == HIGH){
-        //     digitalWrite(BRAKEDPIN, LOW);
-        //     delayMicroseconds(10);
-        // }
-        brakes.moveTo(sensorValueB);
-        sensorValueBLast = sensorValueB;
-    }
+    stepS = sensorValueS;
+    stepA = sensorValueA;
+    stepB = sensorValueB;
     
+    if(stepS > stepSLast + JITTERZONE || stepS < stepSLast - JITTERZONE){
+        steering.moveTo(stepS);
+        stepSLast = stepS;
+    }
+    if(stepA > stepALast + JITTERZONE || stepA < stepALast - JITTERZONE){
+        accelerator.moveTo(stepA);
+        stepALast = stepA;
+    }
+    if(stepB > stepBLast + JITTERZONE || stepB < stepBLast - JITTERZONE){
+        brakes.moveTo(stepB);
+        stepBLast = stepB;
+    }
+    steerAngle = encoderCalc();
     steering.run();
     accelerator.run();
     brakes.run();
@@ -192,178 +245,212 @@ void loop(){
     // Serial.print(sensorValueA);
     // Serial.print("\t");
     // Serial.println(accelerator.currentPosition());
+    Serial.println(steerAngle);
 }
 
 // Initialisation and setup for steppers
 void motorInit(){
-    steering.setMaxSpeed(20000.0);
+    steering.setMaxSpeed(10000.0);
     steering.setAcceleration(20000.0);
     steering.setPinsInverted(true,false,false);
     steering.setMinPulseWidth(20);
-    brakes.setMaxSpeed(10000.0);
-    brakes.setAcceleration(10000.0);
+    brakes.setMaxSpeed(100000.0);
+    brakes.setAcceleration(200000.0);
     brakes.setMinPulseWidth(20);
-    accelerator.setMaxSpeed(150000.0);
-    accelerator.setAcceleration(150000.0);
+    accelerator.setMaxSpeed(15000000.0);
+    accelerator.setAcceleration(15000000.0);
     accelerator.setMinPulseWidth(20);
 }
 
-// Initialisation and setup of remote control
-void remoteInit(){
-    pinMode(CHANNEL1,INPUT);
-    pinMode(CHANNEL2,INPUT);
-    pinMode(CHANNEL3,INPUT);
-    pinMode(CHANNEL4,INPUT);
-    attachInterrupt(digitalPinToInterrupt(CHANNEL1), rising1, RISING);
-    attachInterrupt(digitalPinToInterrupt(CHANNEL2), rising2, RISING);
-    attachInterrupt(digitalPinToInterrupt(CHANNEL3), rising3, RISING);
-    attachInterrupt(digitalPinToInterrupt(CHANNEL4), rising4, RISING);
-    // remoteCalibration();
-    remoteVal();
-}
-
-// calibration program for remote control
-void remoteCalibration(){
-    delay(500);
-    throttleTop = throttleBtm = throttle;
-    rollTop = rollBtm = roll;
-    pitchTop = pitchBtm = pitch;
-    yawTop = yawBtm = yaw;
-
-    Serial.println("Calibrating... Move the sticks around...");
-    Serial.println("Press any key to continue...");
-    while(!Serial.available()){
-        if(throttle > throttleTop){
-            throttleTop = throttle;
-        }
-        if(throttle < throttleBtm){
-            throttleBtm = throttle;
-        }
-        if(roll > rollTop){
-            rollTop = roll;
-        }
-        if(roll < rollBtm){
-            rollBtm = roll;
-        }
-        if(pitch > pitchTop){
-            pitchTop = pitch;
-        }
-        if(pitch < pitchBtm){
-            pitchBtm = pitch;
-        }
-        if(yaw > yawTop){
-            yawTop = yaw;
-        }
-        if(yaw < yawBtm){
-            yawBtm = yaw;
-        }
-        // Serial.println(yaw);
-    }
-    while(Serial.available()){
-        Serial.read();
-    }
-}
-
-void remoteVal(){
-    throttleBtm = 983;
-    throttleTop = 2007;
-    rollBtm = 983;
-    rollTop = 2005;
-    pitchBtm = 987;
-    pitchTop = 2012;
-    yawBtm = 985;
-    yawTop = 2010;
-}
-
-// Remaps raw remote control values to useable ones
-void remoteCalc(){
-    throttleOut = map(throttle, throttleBtm, throttleTop, MINACCEL, MAXACCEL);
-    rollOut = map(roll, rollBtm, rollTop, -100, 100);
-    pitchOut = map(pitch, pitchBtm, pitchTop, MINBRAKE, MAXBRAKE);
-    yawOut = map(yaw, yawBtm, yawTop, MINSTEER, MAXSTEER);
-
-    // Serial.print(throttleBtm);
-    // Serial.print("\t");
-    // Serial.print(throttleTop);
-    // Serial.print("\t");
-    // Serial.print(rollBtm);
-    // Serial.print("\t");
-    // Serial.print(rollTop);
-    // Serial.print("\t");
-    // Serial.print(pitchBtm);
-    // Serial.print("\t");
-    // Serial.print(pitchTop);
-    // Serial.print("\t");
-    // Serial.print(yawBtm);
-    // Serial.print("\t");
-    // Serial.println(yawTop);
-}
-
-// Debug program for printing all remote control values
-void remoteDebug(){
-    Serial.print(throttleOut);
-    Serial.print("\t | \t");
-    Serial.print(rollOut);
-    Serial.print("\t | \t");
-    Serial.print(pitchOut);
-    Serial.print("\t | \t");
-    Serial.println(yawOut);
-}
-
 void encoderInit(){
-    attachInterrupt(digitalPinToInterrupt(ENCODER), encoderRising, RISING);
+    angleSensor.init();
+    zero_position = angleSensor.getRawRotation();
+    zero_position_map = read2angle(zero_position);
 }
 
-void encoderCalc(){
-    angle = ((float)counter/ticksPerRev)*360;
-}
+float inline read2angle(uint16_t angle) {
+  /*
+   * 14 bits = 2^(14) - 1 = 16.383
+   *
+   * https://www.arduino.cc/en/Reference/Map
+   *
+   */
+  return angle * ((float)360 / 16383);
+};
 
-// Remote Interrupt Service Routines
-void rising1() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL1), falling1, FALLING);
-  prev_throttle = micros();
-}
- 
-void falling1() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL1), rising1, RISING);
-  throttle = micros()-prev_throttle;
-}
-
-void rising2() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL2), falling2, FALLING);
-  prev_roll = micros();
-}
- 
-void falling2() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL2), rising2, RISING);
-  roll = micros()-prev_roll;
-}
-
-void rising3() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL3), falling3, FALLING);
-  prev_pitch = micros();
-}
- 
-void falling3() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL3), rising3, RISING);
-  pitch = micros()-prev_pitch;
-}
-
-void rising4() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL4), falling4, FALLING);
-  prev_yaw = micros();
-}
- 
-void falling4() {
-  attachInterrupt(digitalPinToInterrupt(CHANNEL4), rising4, RISING);
-  yaw = micros()-prev_yaw;
-}
-
-void encoderRising(){
-  if(!digitalRead(ENCODERD)){
-    counter++;
+float normalize(float angle) 
+{
+  // http://stackoverflow.com/a/11498248/3167294
+#ifdef ANGLE_MODE_1
+  angle += 180;
+#endif
+  angle = fmod(angle, 360);
+  if (angle < 0) {
+    angle += 360;
   }
-  else{
-    counter--;
-  }
+#ifdef ANGLE_MODE_1
+  angle -= 180;
+#endif
+  return angle;
 }
+
+float encoderCalc(){
+    uint16_t current_angle = angleSensor.getRawRotation();
+    float current_angle_map = read2angle(current_angle);
+
+    float angle = current_angle_map - zero_position_map;
+    angle = normalize(angle);
+    if (angleSensor.error()) {
+      Serial.println(angleSensor.getErrors());
+      return 999;
+    }else{
+      return angle;
+    }
+}
+
+#ifndef ROSMODE
+
+  // Initialisation and setup of remote control
+  void remoteInit(){
+      pinMode(CHANNEL1,INPUT);
+      pinMode(CHANNEL2,INPUT);
+      pinMode(CHANNEL3,INPUT);
+      pinMode(CHANNEL4,INPUT);
+      attachInterrupt(digitalPinToInterrupt(CHANNEL1), rising1, RISING);
+      attachInterrupt(digitalPinToInterrupt(CHANNEL2), rising2, RISING);
+      attachInterrupt(digitalPinToInterrupt(CHANNEL3), rising3, RISING);
+      attachInterrupt(digitalPinToInterrupt(CHANNEL4), rising4, RISING);
+      // remoteCalibration();
+      remoteVal();
+  }
+
+  // calibration program for remote control
+  void remoteCalibration(){
+      delay(500);
+      throttleTop = throttleBtm = throttle;
+      rollTop = rollBtm = roll;
+      pitchTop = pitchBtm = pitch;
+      yawTop = yawBtm = yaw;
+
+      Serial.println("Calibrating... Move the sticks around...");
+      Serial.println("Press any key to continue...");
+      while(!Serial.available()){
+          if(throttle > throttleTop){
+              throttleTop = throttle;
+          }
+          if(throttle < throttleBtm){
+              throttleBtm = throttle;
+          }
+          if(roll > rollTop){
+              rollTop = roll;
+          }
+          if(roll < rollBtm){
+              rollBtm = roll;
+          }
+          if(pitch > pitchTop){
+              pitchTop = pitch;
+          }
+          if(pitch < pitchBtm){
+              pitchBtm = pitch;
+          }
+          if(yaw > yawTop){
+              yawTop = yaw;
+          }
+          if(yaw < yawBtm){
+              yawBtm = yaw;
+          }
+          // Serial.println(yaw);
+      }
+      while(Serial.available()){
+          Serial.read();
+      }
+  }
+
+  void remoteVal(){
+      throttleBtm = 983;
+      throttleTop = 2007;
+      rollBtm = 983;
+      rollTop = 2005;
+      pitchBtm = 987;
+      pitchTop = 2012;
+      yawBtm = 985;
+      yawTop = 2010;
+  }
+
+  // Remaps raw remote control values to useable ones
+  void remoteCalc(){
+      throttleOut = map(throttle, throttleBtm, throttleTop, MINACCEL, MAXACCEL);
+      rollOut = map(roll, rollBtm, rollTop, -100, 100);
+      pitchOut = map(pitch, pitchBtm, pitchTop, MINBRAKE, MAXBRAKE);
+      yawOut = map(yaw, yawBtm, yawTop, MINSTEER, MAXSTEER);
+
+      // Serial.print(throttleBtm);
+      // Serial.print("\t");
+      // Serial.print(throttleTop);
+      // Serial.print("\t");
+      // Serial.print(rollBtm);
+      // Serial.print("\t");
+      // Serial.print(rollTop);
+      // Serial.print("\t");
+      // Serial.print(pitchBtm);
+      // Serial.print("\t");
+      // Serial.print(pitchTop);
+      // Serial.print("\t");
+      // Serial.print(yawBtm);
+      // Serial.print("\t");
+      // Serial.println(yawTop);
+  }
+
+  // Debug program for printing all remote control values
+  void remoteDebug(){
+      Serial.print(throttleOut);
+      Serial.print("\t | \t");
+      Serial.print(rollOut);
+      Serial.print("\t | \t");
+      Serial.print(pitchOut);
+      Serial.print("\t | \t");
+      Serial.println(yawOut);
+  }
+
+  // Remote Interrupt Service Routines
+  void rising1() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL1), falling1, FALLING);
+    prev_throttle = micros();
+  }
+  
+  void falling1() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL1), rising1, RISING);
+    throttle = micros()-prev_throttle;
+  }
+
+  void rising2() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL2), falling2, FALLING);
+    prev_roll = micros();
+  }
+  
+  void falling2() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL2), rising2, RISING);
+    roll = micros()-prev_roll;
+  }
+
+  void rising3() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL3), falling3, FALLING);
+    prev_pitch = micros();
+  }
+  
+  void falling3() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL3), rising3, RISING);
+    pitch = micros()-prev_pitch;
+  }
+
+  void rising4() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL4), falling4, FALLING);
+    prev_yaw = micros();
+  }
+  
+  void falling4() {
+    attachInterrupt(digitalPinToInterrupt(CHANNEL4), rising4, RISING);
+    yaw = micros()-prev_yaw;
+  }
+
+#endif
