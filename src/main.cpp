@@ -218,6 +218,7 @@ void loop(){
       nh.spinOnce();
     #endif
     
+    // Enter formula for conversion from float parameters to steps here
     stepS = sensorValueS;
     stepA = sensorValueA;
     stepB = sensorValueB;
@@ -249,6 +250,7 @@ void loop(){
 }
 
 // Initialisation and setup for steppers
+// Tune the parameters here
 void motorInit(){
     steering.setMaxSpeed(10000.0);
     steering.setAcceleration(20000.0);
@@ -276,21 +278,20 @@ float inline read2angle(uint16_t angle) {
    *
    */
   return angle * ((float)360 / 16383);
-};
+}
 
-float normalize(float angle) 
-{
+float normalize(float angle) {
   // http://stackoverflow.com/a/11498248/3167294
-#ifdef ANGLE_MODE_1
-  angle += 180;
-#endif
+  #ifdef ANGLE_MODE_1
+    angle += 180;
+  #endif
   angle = fmod(angle, 360);
   if (angle < 0) {
     angle += 360;
   }
-#ifdef ANGLE_MODE_1
-  angle -= 180;
-#endif
+  #ifdef ANGLE_MODE_1
+    angle -= 180;
+  #endif
   return angle;
 }
 
