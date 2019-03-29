@@ -180,7 +180,7 @@ word AS5048A::read(word registerAddress){
 	digitalWrite(_cs,HIGH);
 	
 	// slow things down for a bit - other delays may work
-	delayMicroseconds(10);
+	delayMicroseconds(100);
 
 	//Now read the response
 	digitalWrite(_cs, LOW);
@@ -248,6 +248,9 @@ word AS5048A::write(word registerAddress, word data) {
 	SPI.transfer(left_byte);
 	SPI.transfer(right_byte);
 	digitalWrite(_cs,HIGH);
+
+	// slow things down for a bit - other delays may work
+	delayMicroseconds(100);
 	
 	word dataToSend = 0b0000000000000000;
 	dataToSend |= data;

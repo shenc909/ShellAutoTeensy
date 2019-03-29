@@ -21,7 +21,11 @@
 #include <SPI.h>
 #include <AS5048A.h>
 
+// CONFIGURATION PARAMETERS
+// Defines if ROS is being used or remote is being used
 #define ROSMODE
+// Defines if control is via position (steps) or via velocity
+// #define STEPMODE
 
 // Interrupts configuration
 #define CHANNEL1 36
@@ -71,24 +75,33 @@ long stepSLast = 0;
 
 #ifdef ROSMODE
   #include <ros.h>
-  #include <std_msgs/Float64.h>
+  #include <std_msgs/Float32.h>
   ros::NodeHandle nh;
 
-  void messageACb(const std_msgs::Float64& msg){
+  void messageACb(const std_msgs::Float32& msg){
     sensorValueA = msg.data;
   }
 
-  void messageBCb(const std_msgs::Float64& msg){
+  void messageBCb(const std_msgs::Float32& msg){
     sensorValueB = msg.data;
   }
 
-  void messageSCb(const std_msgs::Float64& msg){
+  void messageSCb(const std_msgs::Float32& msg){
     sensorValueS = msg.data;
   }
 
-  ros::Subscriber<std_msgs::Float64> subA("Accel", &messageACb);
-  ros::Subscriber<std_msgs::Float64> subB("Brake", &messageBCb);
-  ros::Subscriber<std_msgs::Float64> subS("Steering", &messageSCb);
+  ros::Subscriber<std_msgs::Float32> subA("Accel", &messageACb);
+  ros::Subscriber<std_msgs::Float32> subB("Brake", &messageBCb);
+  ros::Subscriber<std_msgs::Float32> subS("Steering", &messageSCb);
+#endif
+
+#ifndef STEPMODE
+#include <PID_v1.h>
+//Define Variables we'll be connecting to
+double Setpoint, Input, Output;
+//Specify the links and initial tuning parameters
+double Kp=2, Ki=5, Kd=1;
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
 #endif
 
 // Setting up steppers
@@ -132,7 +145,7 @@ FilterOnePole brakeFilter(LOWPASS, filterFrequency);
 
 // Encoder code
 AS5048A angleSensor(ENCODER);
-uint16_t zero_position;
+uint16_t zero_position = 15037;
 uint16_t zero_position_map;
 float steerAngle = 0;
 
@@ -158,6 +171,7 @@ float steerAngle = 0;
 void motorInit();
 void remoteInit();
 void encoderInit();
+void encoderDebug();
 #ifndef ROSMODE
   void remoteCalc();
   void remoteDebug();
@@ -187,6 +201,7 @@ void setup(){
       remoteInit();
       yawOut = 0;
     #endif
+    SPI.setSCK(14);
     encoderInit();
     pinMode(STEERDPIN, OUTPUT);
     pinMode(STEERPPIN, OUTPUT);
@@ -218,6 +233,7 @@ void loop(){
       nh.spinOnce();
     #endif
     
+    #ifdef STEPMODE
     // Enter formula for conversion from float parameters to steps here
     stepS = sensorValueS;
     stepA = sensorValueA;
@@ -235,18 +251,30 @@ void loop(){
         brakes.moveTo(stepB);
         stepBLast = stepB;
     }
-    steerAngle = encoderCalc();
     steering.run();
     accelerator.run();
     brakes.run();
+    #endif
+
+    #ifndef STEPMODE
+    //PID CODE HERE
+    steering.setSpeed(0);
+    accelerator.setSpeed(0);
+    brakes.setSpeed(0);
+
+    steering.runSpeed();
+    accelerator.runSpeed();
+    brakes.runSpeed();
+    #endif
+    encoderDebug();
     // Serial.print(sensorValueS);
     // Serial.print("\t");
     // Serial.print(steering.currentPosition());
     // Serial.print("\t");
     // Serial.print(sensorValueA);
     // Serial.print("\t");
+    // Serial.println(sensorValueB);
     // Serial.println(accelerator.currentPosition());
-    Serial.println(steerAngle);
 }
 
 // Initialisation and setup for steppers
@@ -266,7 +294,7 @@ void motorInit(){
 
 void encoderInit(){
     angleSensor.init();
-    zero_position = angleSensor.getRawRotation();
+    // zero_position = angleSensor.getRawRotation();
     zero_position_map = read2angle(zero_position);
 }
 
@@ -307,6 +335,10 @@ float encoderCalc(){
     }else{
       return angle;
     }
+}
+
+void encoderDebug(){
+  Serial.println(steerAngle);
 }
 
 #ifndef ROSMODE

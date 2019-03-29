@@ -22,7 +22,7 @@
  *
  */
 
-//#define ANGLE_MODE_1  // Between -180° and 180°
+#define ANGLE_MODE_1  // Between -180° and 180°
 
 AS5048A angleSensor(15);
 uint16_t zero_position;
@@ -56,6 +56,7 @@ float normalize(float angle)
 
 void setup()
 {
+  SPI.setSCK(14);
   Serial.begin(115200);
   angleSensor.init();
 
@@ -76,10 +77,7 @@ void loop()
   float angle = current_angle_map - zero_position_map;
   angle = normalize(angle);
 
-  Serial << current_angle << "\t"
-      << current_angle_map << "\t"
-      << angle 
-      << endl << endl;
+  
 /*  
   Serial << rel_angle
       << "\t" << _BIN(rel_angle) 
@@ -88,5 +86,7 @@ void loop()
 
   if (angleSensor.error()) {
     Serial << "ERROR: " << angleSensor.getErrors() << endl;
+  }else{
+    Serial.println(zero_position);
   }
 }
