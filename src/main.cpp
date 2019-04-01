@@ -1,18 +1,7 @@
 /*
- * allTeensy Code Version 4.0.0
+ * allTeensy Code Version 5.0.0
  * This code is specific to the teensy 3.5
- * 
- */
-
-/*
- * REMOTE CONFIGURATION
- * 
- * Code starts in calibration mode, move sticks to extents to calibrate
- * Send any serial information to arduino to proceed once done
- * 
- * throttleOut, rollOut, pitchOut, and yawOut are the calibrated values.
- * throttleOut ranges from 0 to 100, while the rest range from -100 to 100.
- * NOTE: THIS CODE HAS YAW RANGE changed from 0 to 70 as per SmoothSteering Code.
+ * Author: Shen Chen
  * 
  */
 
@@ -23,7 +12,7 @@
 
 // CONFIGURATION PARAMETERS
 // Defines if ROS is being used or remote is being used
-#define ROSMODE
+// #define ROSMODE
 // Defines if control is via position (steps) or via velocity
 // #define STEPMODE
 
@@ -41,11 +30,12 @@
 #define BRAKEDPIN 28
 #define BRAKEPPIN 29
 
+// Removes Jitter in the steps, this is the range where the motor will ignore step commands
 #define JITTERZONE 3
 
 // Software limited steps for the steppers
-#define MINSTEER -3000
-#define MAXSTEER 3000
+#define MINSTEER -5000
+#define MAXSTEER 5000
 #define MINACCEL 0
 #define MAXACCEL 1200
 #define MINBRAKE -5000
@@ -53,13 +43,13 @@
 
 // Encoder pin definitions for CSn
 #define ENCODER 15
-//#define ANGLE_MODE_1  // Between -180° and 180°
 
 // Final sensor values to be used by the program
 long sensorValueS;
 long sensorValueB;
 long sensorValueA;
 
+// Middle step for doing conversion from percentage to steps
 long stepS;
 long stepB;
 long stepA;
@@ -164,7 +154,7 @@ float steerAngle = 0;
  *
  */
 
-//#define ANGLE_MODE_1  // Between -180° and 180°
+#define ANGLE_MODE_1  // Between -180° and 180°
 
 
 // Function forward declaration
@@ -216,6 +206,10 @@ void setup(){
       nh.subscribe(subB);
       nh.subscribe(subS);
     #endif
+
+    #ifndef STEPMODE
+    myPID.SetMode(AUTOMATIC);
+    #endif
 }
 
 void loop(){
@@ -233,16 +227,20 @@ void loop(){
       nh.spinOnce();
     #endif
     
-    #ifdef STEPMODE
     // Enter formula for conversion from float parameters to steps here
     stepS = sensorValueS;
     stepA = sensorValueA;
     stepB = sensorValueB;
     
+    int percentageAccel = map(sensorValueA, MINACCEL, MAXACCEL, 0, 100);
+    int percentageBrake = map(sensorValueB, MINBRAKE, MAXBRAKE, -100, 0);
+    #ifdef STEPMODE
     if(stepS > stepSLast + JITTERZONE || stepS < stepSLast - JITTERZONE){
         steering.moveTo(stepS);
         stepSLast = stepS;
     }
+    #endif
+
     if(stepA > stepALast + JITTERZONE || stepA < stepALast - JITTERZONE){
         accelerator.moveTo(stepA);
         stepALast = stepA;
@@ -251,30 +249,35 @@ void loop(){
         brakes.moveTo(stepB);
         stepBLast = stepB;
     }
+
+    #ifdef STEPMODE
     steering.run();
+    #endif
+
     accelerator.run();
     brakes.run();
-    #endif
 
     #ifndef STEPMODE
     //PID CODE HERE
-    steering.setSpeed(0);
-    accelerator.setSpeed(0);
-    brakes.setSpeed(0);
+    Input = steerAngle;
+    Setpoint = sensorValueS;
+    myPID.Compute();
+
+    steering.setSpeed(Output);
 
     steering.runSpeed();
-    accelerator.runSpeed();
-    brakes.runSpeed();
     #endif
-    encoderDebug();
+
+    // encoderDebug();
     // Serial.print(sensorValueS);
     // Serial.print("\t");
     // Serial.print(steering.currentPosition());
     // Serial.print("\t");
-    // Serial.print(sensorValueA);
-    // Serial.print("\t");
-    // Serial.println(sensorValueB);
+    Serial.print(percentageAccel);
+    Serial.print("\t");
+    Serial.println(percentageBrake);
     // Serial.println(accelerator.currentPosition());
+    // Serial.println(sensorValueB);
 }
 
 // Initialisation and setup for steppers
@@ -412,10 +415,17 @@ void encoderDebug(){
 
   // Remaps raw remote control values to useable ones
   void remoteCalc(){
+
       throttleOut = map(throttle, throttleBtm, throttleTop, MINACCEL, MAXACCEL);
       rollOut = map(roll, rollBtm, rollTop, -100, 100);
       pitchOut = map(pitch, pitchBtm, pitchTop, MINBRAKE, MAXBRAKE);
+    #ifdef STEPMODE
       yawOut = map(yaw, yawBtm, yawTop, MINSTEER, MAXSTEER);
+    #endif
+
+    #ifndef STEPMODE
+      yawOut = map(yaw, yawBtm, yawTop, -180, 180);
+    #endif
 
       // Serial.print(throttleBtm);
       // Serial.print("\t");
